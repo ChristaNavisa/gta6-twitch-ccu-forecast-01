@@ -13,14 +13,18 @@ and launches whose unlock was one simultaneous global moment (their hour 1
 is pre-launch noise) or a PC unlock at a different time than the consoles.
 
 For each hour we then regress the log ratio on log(hour-1 print) across the
-kept launches, with the slope shrunk by 3/4 towards zero, and clamp the
-predicted ratio to the range the kept launches actually show at that hour.
+kept launches, with the slope shrunk by 0.90 towards zero, and centre the
+prediction on the median ratio of the kept launches (not their mean, so one
+breakout launch cannot drag the centre), then clamp the predicted ratio to
+the range the kept launches actually show at that hour.
 Big launches run flatter than small ones (the whole world is already
 watching at hour 1), small ones climb steeply once the Americas unlock, and
 the regression captures that without ever predicting a shape no launch
 showed. The spread is the residual standard deviation of that regression,
-floored at 0.20 in log space, so the 5%-95% band stays honest about how
-much launch days differ from each other.
+floored at 0.20 in log space and widened by 1.15, because the residuals
+are measured in-sample and so understate the error on a new launch; the
+widening keeps the 5%-95% band honest about how much launch days differ
+from each other.
 
 Quantiles are lognormal around the predicted median:
     q_tau = p * exp(m_h + z_tau * s_h)
@@ -42,9 +46,12 @@ Z = [-1.6448536269514722, -0.6744897501960817, 0.0,
 
 # Slope shrinkage for the size regression (0 = plain median profile,
 # 1 = full least-squares slope).
-SHRINK = 0.75
+SHRINK = 0.90
 # Floor on the log-space spread, so no hour is forecast overconfidently.
 SPREAD_FLOOR = 0.20
+# The residuals are measured in-sample, so they understate the error on a
+# new launch; widen the spread by this factor to compensate.
+SPREAD_MULT = 1.15
 # A launch needs at least this many viewers in hour 1 for the print to be
 # a real post-unlock count rather than pre-launch noise.
 MIN_HOUR1 = 5000
@@ -146,13 +153,15 @@ def _fit(series_list, hour1):
         else:
             slope = 0.0
         slope *= SHRINK
-        median = y_mean + slope * x_target
+        # Centre on the median ratio, not the mean: one breakout launch
+        # (a small game that explodes) must not drag the whole centre up.
+        median = statistics.median(ratios) + slope * x_target
         # Never predict a shape no kept launch showed at that hour.
         median = max(min(median, max(ratios)), min(ratios))
         residuals = [y - (y_mean + slope * (x - x_mean))
                      for x, y in zip(xs, ratios)]
         spread = statistics.stdev(residuals) if len(residuals) > 1 else 0.3
-        out[h] = (median, max(spread, SPREAD_FLOOR))
+        out[h] = (median, max(spread, SPREAD_FLOOR) * SPREAD_MULT)
     return out
 
 
